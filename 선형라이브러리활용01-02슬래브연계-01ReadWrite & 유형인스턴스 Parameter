@@ -38,6 +38,7 @@ dataEnteringNode = IN
 # 코드를 이 선 아래에 배치------------------------------------------
 SlabEle=IN[0]             #선택한 '슬래브'Elemnet
 Data=IN[1]
+Data_Slab=IN[4]
 Colm=IN[2].Split(",")
 if len(IN[3])==0:         #Val의 값인 Empty인경우 에 대한 조치
 	Val=IN[3]
@@ -86,8 +87,39 @@ ParaName=[]     #D:매개변수명
 InOrFa=[]       #S:매개변수 TYPE
 LogicType1=[]   #W:Logic Library활용 TYPE1
 ParaUnit=[]     #G:매개변수 단위(Msg용)
-SpanNo=str(SlabEle.GetParameterValueByName("구간(경간)정보")) #구간 정보(Parameter)
-	
+SpanNo=str(SlabEle.GetParameterValueByName("구간(경간)정보"))+"_" #구간 정보(Parameter)
+
+
+
+#2-1. 부모 라이브러리(슬래브)의 전역변수 먼저 생성####################
+AssoPara_Fa_Slab=[]      #Make GlobalPara, Associate (Family)Para
+AssoPara_In_Slab=[]      #Make GlobalPara, Associate (Instance)Para
+GP_In_Slab=[]          #Instance Parameter와 연계될 전역매개변수
+GP_Fa_Slab=[]          #Family   Parameter와 연계될 전역매개변수
+
+for i in range(Row_Sta-1,len(Data_Slab)):
+	ComData=Data_Slab[i]
+	Name=ComData[GetIndex[0]]           #Parameter Name
+	bool=DEFIF(ComData[GetIndex[1]])    #Instance / Family Type 구분
+	Type=DEFTYPE(ComData[GetIndex[2]])  #Read / Write / Associate Type구분
+
+	if Type=="Associate":
+		GP=GlobalParameter.FindByName(SpanNo+Name)
+		if not GP: #전역매개변수가 없는 경우 생성
+			PType=DEFTYPE(ComData[GetIndex[3]]) #Parameter 유형
+			GP=GlobalParameter.ByName(SpanNo+Name,PType)
+		SlabVal=float(SlabEle.GetParameterValueByName(Name))
+		GlobalParameter.SetValue(GP,SlabVal)
+		if bool:
+			AssoPara_In_Slab.append(Name)
+			GP_In_Slab.append(GP)
+		else:
+			AssoPara_Fa.append(Name)
+			GP_Fa_Slab.append(GP)
+#2-1[END] 부모 라이브러리의(슬래브) 전역변수 먼저 생성################
+
+
+
 ReadPara_In=[]      #Read(Instance)Parameter
 ReadPara_Fa=[]      #Read(Family)Parameter
 WritePara_In=[]     #Write(Instance)Parameter
@@ -100,7 +132,7 @@ WritePara=[]        #입력으로 받아야 하는 Prameter : [Name, Unit]: Para
 NewGP=[]            #전역매개변수를 생성해야 하는 매개변수 [Name, parameterType]
 Val_W=[]            #입력값 중 Write 해야하는 매개변수의 value
 Val_A=[]            #입력값 중 Associate 해야하는 매개변수의 value
-Test=[]
+
 
 j=0
 for i in range(Row_Sta-1,len(Data)):
@@ -217,4 +249,4 @@ else:
 
 
 # 출력을 OUT 변수에 지정합니다.
-OUT = ParameterName, value, FParameterName, Fvalue, AParameterName, GP_In, AFParameterName, GP_Fa, SlabEle, Msg
+OUT = ParameterName, value, FParameterName, Fvalue, AParameterName, GP_In, AFParameterName, GP_Fa, AssoPara_In_Slab, GP_In_Slab, AssoPara_Fa_Slab, GP_Fa_Slab, SlabEle, Msg
