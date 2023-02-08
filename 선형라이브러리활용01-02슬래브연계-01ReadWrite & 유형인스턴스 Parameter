@@ -1,0 +1,220 @@
+import clr
+# Import DesignScript Grometry Library
+clr.AddReference('ProtoGeometry')
+from Autodesk.DesignScript.Geometry import *
+# Import ToDSType(bool) extension method
+clr.AddReference("RevitNodes")
+import Revit
+from Revit.Elements import *
+clr.ImportExtensions(Revit.Elements)
+clr.ImportExtensions(Revit.GeometryConversion)
+# Import DocumentManager and TransactionManager
+clr.AddReference("RevitServices")
+import RevitServices
+from RevitServices.Persistence import DocumentManager
+from RevitServices.Transactions import TransactionManager
+doc = DocumentManager.Instance.CurrentDBDocument
+uiapp = DocumentManager.Instance.CurrentUIApplication
+app = uiapp.Application
+from System.Collections.Generic import *
+# Import RevitAPI, Loft와 충돌있음
+clr.AddReference('RevitAPI')
+#from Autodesk.Revit.DB import *
+from Autodesk import *
+from Autodesk.Revit.DB.Structure import *
+
+clr.AddReference('RevitAPIUI')
+from Autodesk.Revit.UI import *
+
+import math
+clr.AddReference('DSCoreNodes') 
+import DSCore as DS
+from DSCore import *
+
+from System import Array
+#이 노드에 대한 입력값은 IN 변수에 리스트로 저장됩니다.
+dataEnteringNode = IN
+
+# 코드를 이 선 아래에 배치------------------------------------------
+SlabEle=IN[0]             #선택한 '슬래브'Elemnet
+Data=IN[1]
+Colm=IN[2].Split(",")
+if len(IN[3])==0:         #Val의 값인 Empty인경우 에 대한 조치
+	Val=IN[3]
+else:
+	Val=IN[3].Split(",")      #입력 Value (확인 과정 필요)
+Row_Sta=4   #4행부터 Read
+#-----------------------------------------------------------------
+	
+def ABCToNumber(Alpha): #대문자(소) 알파벳 숫자로 변환
+	Alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+	alphabet='abcdefghijklmnopqrstuvwxyz'
+	if Alphabet.IndexOf(Alpha)==-1:
+		return alphabet.IndexOf(Alpha)
+	else:
+		return Alphabet.IndexOf(Alpha)
+def DEFTYPE(Text):
+	if Text=="경사":
+		return "Slope"
+	elif Text=="길이":
+		return "Length"
+	elif Text=="각도":
+		return "Angle"
+	else:
+		return Text
+
+def DEFGROUP(Text):
+	if Text=="치수":
+		return "PG_GEOMETRY"
+	else:
+		return Text
+
+def DEFIF(Text):
+	if Text=="인스턴스":
+		return True
+	elif Text=="유형":
+		return False
+		
+#2. 매개변수 분류 ###############################################	
+#----------------엑셀 column을 col Nomber로----------------------
+GetIndex=[] #ParaName, Instance or Family, Logic Library TYPE1
+for i in Colm:
+	GetIndex.append(ABCToNumber(i))	
+
+
+ParaName=[]     #D:매개변수명
+InOrFa=[]       #S:매개변수 TYPE
+LogicType1=[]   #W:Logic Library활용 TYPE1
+ParaUnit=[]     #G:매개변수 단위(Msg용)
+SpanNo=str(SlabEle.GetParameterValueByName("구간(경간)정보")) #구간 정보(Parameter)
+	
+ReadPara_In=[]      #Read(Instance)Parameter
+ReadPara_Fa=[]      #Read(Family)Parameter
+WritePara_In=[]     #Write(Instance)Parameter
+WritePara_Fa=[]     #Write(Family)Parameter
+WriteAssoPara_Fa=[] #Make GlobalPara, set Value, Associate (Family)Para
+WriteAssoPara_In=[] #Make GlobalPara, set Value, Associate (Instance)Para
+AssoPara_Fa=[]      #Make GlobalPara, Associate (Family)Para
+AssoPara_In=[]      #Make GlobalPara, Associate (Instance)Para
+WritePara=[]        #입력으로 받아야 하는 Prameter : [Name, Unit]: Parameter 갯수 체크
+NewGP=[]            #전역매개변수를 생성해야 하는 매개변수 [Name, parameterType]
+Val_W=[]            #입력값 중 Write 해야하는 매개변수의 value
+Val_A=[]            #입력값 중 Associate 해야하는 매개변수의 value
+Test=[]
+
+j=0
+for i in range(Row_Sta-1,len(Data)):
+	ComData=Data[i]
+	Name=ComData[GetIndex[0]]           #Parameter Name
+	bool=DEFIF(ComData[GetIndex[1]])    #Instance / Family Type 구분
+	Type=DEFTYPE(ComData[GetIndex[2]])  #Read / Write / Associate Type구분
+	Descript=ComData[GetIndex[4]]       #Parameter 설명
+	Unit=ComData[GetIndex[5]]           #Parameter 단위
+	if Type=="Read":
+		if bool:
+			ReadPara_In.append(Name)
+		else:
+			ReadPara_Fa.append(Name)
+	elif Type=="Write":
+		if bool:
+			WritePara_In.append(Name)
+		else:
+			WritePara_Fa.append(Name)
+		WritePara.append(Name+", 단위:"+Unit+" (해당객체만 가진 값) 설명: "+Descript)
+		try:
+			Val_W.append(Val[j])              #Write의 Value
+			j=j+1
+		except:
+			AA=1
+	elif Type=="Associate":
+		GP=GlobalParameter.FindByName(SpanNo+Name)
+		if not GP: #전역매개변수가 없는 경우 입력값 요청
+			WritePara.append(Name+", 단위:"+Unit+" (전역매개변수) 설명: "+Descript)
+			PType=DEFTYPE(ComData[GetIndex[3]]) #Parameter 유형
+			NewGP.append([SpanNo+Name,PType])
+			try:
+				Val_A.append(Val[j])              #Associate의 Value
+				j=j+1
+			except:
+				AA=1
+		if bool:
+			AssoPara_In.append(Name)
+		else:
+			AssoPara_Fa.append(Name)
+
+
+
+
+#3. 매개변수 분류 ######################################################
+#Parameter
+Para=SlabEle.Parameters                #슬래브의 Parameter(Instance)
+FPara=SlabEle.ElementType.Parameters   #슬래브의 Parameter(Family)
+
+#Output List
+ParameterName=[]  #Instance Parameter "Name"
+value=[]          #Instance Parameter "Value"
+FParameterName=[] #Family   Parameter "Name"
+Fvalue=[]         #Family   Parameter "Value"
+AParameterName=[] #전역매개변수와 연계될 Instance Parameter "Name"
+GP_In=[]          #Instance Parameter와 연계될 전역매개변수
+AFParameterName=[]#전역매개변수와 연계될 Family   Parameter "Name"
+GP_Fa=[]          #Family   Parameter와 연계될 전역매개변수
+
+
+#입력 Data 갯수 확인
+No=len(WritePara)
+########################C. 갯수 맞는경우 진행=>OK #########################
+if len(Val)==No:
+	Msg="No error : Input "+str(len(Val))+"EA"
+	#전역매개변수 생성 및 값 입력
+	for i, j in zip(NewGP, Val):
+		GP=GlobalParameter.ByName(i[0],i[1])
+		GlobalParameter.SetValue(GP,float(j))
+	#Read : Instnace Parameter------------------------------------------
+	for j in ReadPara_In: #Void 관련  제외, 해당문자로 시작하는 para 포함
+		for i in Para:
+			if (i.Name).StartsWith(j) and not (i.Name).EndsWith("Void"):
+				ParameterName.append(i.Name)
+				value.append(i.Value)
+	
+	#Read : Family Parameter
+	for j in ReadPara_Fa:
+		for i in FPara:
+			if i.Name==j:
+				FParameterName.append(j)
+				Fvalue.append(i.Value)
+	
+	#Write : Instace Parameter-----------------------------------------
+	for i in range(len(WritePara_In)):
+		ParameterName.append(WritePara_In[i])
+		value.append(float(Val_W[i]))
+	
+	#Write : Family Parameter
+	j=i #Value List는 Instance와 Family Type이 섞여있음
+	for i in range(len(WritePara_Fa)):
+		FParameterName.append(WritePara_Fa[i])
+		Fvalue.append(float(Val_W[i+j]))
+
+	#Associate : Instace Parameter-------------------------------------
+	for i in range(len(AssoPara_In)):
+		AParameterName.append(AssoPara_In[i])
+		GP_In.append(GlobalParameter.FindByName(SpanNo+AssoPara_In[i]))
+
+	#Associate : Family Parameter
+	for i in range(len(AssoPara_Fa)):
+		AFParameterName.append(AssoPara_Fa[i])
+		GP_Fa.append(GlobalParameter.FindByName(AssoPara_Fa[i]))
+
+##########################C. 갯수 맞지 않는 경우=>NG #####################
+else:
+	Msg=[]
+	SlabEle=[]
+	Msg.append("Value(Input) Error : Input "+str(len(Val))+"EA, Need "+str(No)+"EA")
+	Msg.append("▼▼▼▼▼▼▼▼ Input ▼▼▼▼▼▼▼▼")
+	for i in WritePara:
+		Msg.append(i)
+
+
+
+# 출력을 OUT 변수에 지정합니다.
+OUT = ParameterName, value, FParameterName, Fvalue, AParameterName, GP_In, AFParameterName, GP_Fa, SlabEle, Msg
